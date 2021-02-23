@@ -7,33 +7,37 @@ Fedora GPU Passthrough Setup Guide
     - BIOS Ver: E7B89AMS.270
     - BIOS Build Date: 04/21/2020
 - GPU 1 (PCIe Slot 1) - GIGABYTE AORUS GeForce® GTX 1080 
-- GPU 2 (PCIe Slot 4) - ~~QUADRO NVS 450~~ ASUS GeForce GT 1030 Silent 
-- AMD Ryzen 3 3300X
+- GPU 2 (PCIe Slot 4) - NVIDIA Quadro M2000 
+- AMD Ryzen 9 3900X
 - 64GB RAM
 - AMD Matisse USB 3.0 Host Controller (integrated in CPU)
 - Intel NVMe SSD (1 TB) (M.2 Slot 1)
-- Toshiba SATA SSD (500 GB) (SATA ports)
+- Toshiba SATA SSDs (3x 500 GB) (SATA ports)
 
 ## Operating Systems:
 - **Host:** Fedora 33
-- **Guest:** Windows 10
+- **Guest 1:** Windows 10 - gaming
+- **Guest 2:** Fedora 33 - working
 
 ## First time power-on
-- Connect only GPU 1 to the monitors
+- Connect only GPU1 to the monitors and leave GPU2 disconnected, otherwise the system will 
 - The motherboard may take a while to "warm up" with the newly added hardware or new booting media
 
 ## Bios Settings:
+Press `DEL` to enter BIOS settings
 - enable **Overclocking\CPU Feature\SVM Mode**
 - enable **Overclocking\CPU Features\IOMMU** 
 
 ## Host preparation:
-- install Fedora on the SATA SSD
+- install Fedora on the M.2 SSD with the thin LVM partition schema
+    - through `custom`
+    - add `/boot/efi` partition 
 - update and reboot
     - `dnf update`
     - `reboot`
-- after installation, update system and install virtualization and uefi bios for the VM:
+- install virtualization and uefi bios for the VM:
     - `dnf install @virtualization`
-    - `dnf install edk2-ovmf`
+    - `dnf install edk2-ovmf` (should be installed already)
 - prepare grub with `nano /etc/default/grub` and add to **GRUB_CMDLINE_LINUX=** at the end:
     - `amd_iommu=pt rd.driver.pre=vfio-pci rd.driver.blacklist=nouveau`
 - activate modules:
@@ -44,31 +48,32 @@ Fedora GPU Passthrough Setup Guide
 - regenerate initramfs:
     - `dracut -f --kver $(uname -r)`
 - perm and generate grub configuration:
+    - take a backup `install -m 600 /boot/efi/EFI/fedora/grub.cfg ~/grub.cfg-$(date --iso-8601=minutes).bak`
     - `grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg`
     - reboot
+- verify if the CMDLINE has been picked up
+    - `cat /proc/cmdline`
 - check iommu groups and get device IDs:
     - `for g in /sys/kernel/iommu_groups/*; do echo "IOMMU Group ${g##*/}:"; for d in $g/devices/*; do echo -e "\t$(lspci -nns ${d##*/})"; done; done`
     - get all IDs within the group where you devices is member, example output:
         - ```
-          IOMMU Group 16:
-                  01:00.0 Non-Volatile memory controller [0108]: Intel Corporation Device [8086:faf0] (rev 03)
           IOMMU Group 18:
                   26:00.0 VGA compatible controller [0300]: NVIDIA Corporation GP104 [GeForce GTX 1080] [10de:1b80] (rev a1)
                   26:00.1 Audio device [0403]: NVIDIA Corporation GP104 High Definition Audio Controller [10de:10f0] (rev a1)
           IOMMU Group 22:
                   28:00.3 USB controller [0c03]: Advanced Micro Devices, Inc. [AMD] Matisse USB 3.0 Host Controller [1022:149c]
           ```
-        - IDs are: 8086:faf0, 10de:1b80, 10de:10f0, 1022:149c
-- for passthrough I need the IDs from graphic card, USB Controller, and the NVMe M.2:
+        - IDs are: `8086:faf0`, `10de:1b80`, `10de:10f0`, `1022:149c`
+- for passthrough I need the IDs from graphic card and USB Controller:
     - `10de:1b80,10de:10f0`
     - `1022:149c`
-    - `8086:faf0`
 - add these IDs to **/etc/modprobe.d/vfio.conf**:
-    - `options vfio-pci ids=10de:1b80,10de:10f0,1022:149c,8086:faf0`
+    - `options vfio-pci ids=10de:1b80,10de:10f0,1022:149c`
     - reconfigure kernel and grub again:
     - `dracut -f --kver $(uname -r)`
     - `grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg`
-    - reboot
+    - reboot and connect GPU 2 to the monitors. Now GPU 1 will only show the BIOS
+      flash screen and Fedora will use GPU 2 as the main output device
 - check if **VFIO** driver are loaded:
     - `dmesg | grep -i vfio`
     - also, check every device with: `lspci -nnk -d 10de:1b80`
